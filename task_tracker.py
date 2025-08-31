@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsItem,
     QGraphicsTextItem, QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QTextEdit,
     QPushButton, QColorDialog, QFormLayout, QDateEdit, QComboBox, QMessageBox,
-    QGraphicsProxyWidget, QStyleOptionGraphicsItem, QWidget, QMenu
+    QGraphicsProxyWidget, QStyleOptionGraphicsItem, QWidget, QMenu, QGraphicsEllipseItem, QGraphicsLineItem
 )
 from PyQt6.QtCore import Qt, QPointF, QRectF, QDate, QLineF
 from PyQt6.QtGui import QColor, QBrush, QPen, QPainter, QPainterPath, QFont
@@ -13,6 +13,56 @@ from PyQt6.QtGui import QColor, QBrush, QPen, QPainter, QPainterPath, QFont
 # --- CONFIGURATION ---
 SAVE_FILE = 'tasks.json'
 DEFAULT_NODE_COLOR = '#ffc107'  # A nice amber color
+
+class PortItem(QGraphicsEllipseItem):
+    """Small draggable connection point on a TaskNode edge."""
+    def __init__(self, parent_node, edge, main_window):
+        radius = 6
+        super().__init__(-radius, -radius, 2*radius, 2*radius, parent_node)
+        self.setBrush(QBrush(Qt.GlobalColor.white))
+        self.setPen(QPen(Qt.GlobalColor.black, 1))
+        self.setZValue(2)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsScenePositionChanges)
+        self.setAcceptHoverEvents(True)
+
+        self.parent_node = parent_node
+        self.edge = edge
+        self.main_window = main_window
+        self.drag_line = None
+
+    def hoverEnterEvent(self, event):
+        self.setBrush(QBrush(Qt.GlobalColor.yellow))
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.setBrush(QBrush(Qt.GlobalColor.white))
+        super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Start a temporary line while dragging
+            self.drag_line = QGraphicsLineItem(QLineF(self.scenePos(), self.scenePos()))
+            self.drag_line.setPen(QPen(Qt.GlobalColor.darkGray, 2, Qt.PenStyle.DashLine))
+            self.scene().addItem(self.drag_line)
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_line:
+            line = QLineF(self.scenePos(), event.scenePos())
+            self.drag_line.setLine(line)
+
+    def mouseReleaseEvent(self, event):
+        if self.drag_line:
+            # Check for another port at drop position
+            items = self.scene().items(event.scenePos())
+            for item in items:
+                if isinstance(item, PortItem) and item is not self:
+                    # Create a connection between parent nodes
+                    self.main_window.add_connection(self.parent_node, item.parent_node)
+                    break
+            self.scene().removeItem(self.drag_line)
+            self.drag_line = None
+
 
 class TaskNode(QGraphicsItem):
     """
@@ -45,7 +95,16 @@ class TaskNode(QGraphicsItem):
         self.details = QGraphicsTextItem(self)
         self.details.setDefaultTextColor(QColor("#495057")) # A dark gray
 
+        
+
+        # Create ports
+        self.ports = {}
+        for edge in ["top", "bottom", "left", "right"]:
+            port = PortItem(self, edge, self.main_window)
+            self.ports[edge] = port
+        
         self.update_display()
+        self.update_ports()
 
     def boundingRect(self):
         """Defines the outer boundaries of the item."""
@@ -66,7 +125,7 @@ class TaskNode(QGraphicsItem):
             pen.setStyle(Qt.PenStyle.DotLine)
             painter.setPen(pen)
         else:
-             painter.setPen(QPen(Qt.GlobalColor.black, 1))
+            painter.setPen(QPen(Qt.GlobalColor.black, 1))
 
         painter.drawPath(path)
         
@@ -92,6 +151,14 @@ class TaskNode(QGraphicsItem):
         # --- Tooltip ---
         self.setToolTip(f"Description: {self.task_data.get('description', 'N/A')}\n"
                         f"Category: {self.task_data.get('category', 'N/A')}")
+
+    def update_ports(self):
+        """Repositions ports on edges of the node."""
+        rect = self.boundingRect()
+        self.ports["top"].setPos(rect.center().x(), rect.top())
+        self.ports["bottom"].setPos(rect.center().x(), rect.bottom())
+        self.ports["left"].setPos(rect.left(), rect.center().y())
+        self.ports["right"].setPos(rect.right(), rect.center().y())
     
     def add_line(self, line):
         """Registers a connection line with this node."""
@@ -108,12 +175,12 @@ class TaskNode(QGraphicsItem):
     def itemChange(self, change, value):
         """Called when the item's state changes, e.g., it's moved."""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
-            # Update the position in the data model
             self.task_data['pos'] = [self.pos().x(), self.pos().y()]
-            # Update all connected lines
-            for line in self.lines:
-                line.update_position()
-            self.main_window.save_data() # Save on move
+            if hasattr(self, "ports"):  # <-- only update if ports exist
+                self.update_ports()
+                for line in self.lines:
+                    line.update_position()
+            self.main_window.save_data()
         return super().itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
@@ -129,10 +196,7 @@ class TaskNode(QGraphicsItem):
             self.main_window.delete_task(self)
             
         super().mouseDoubleClickEvent(event)
-        
-    def contextMenuEvent(self, event):
-        """Handles right-click for connecting nodes."""
-        self.main_window.node_context_menu(self, event)
+
 
 class ConnectionLine(QGraphicsItem):
     """A line that connects two TaskNodes."""
@@ -150,7 +214,9 @@ class ConnectionLine(QGraphicsItem):
         self.update_position()
 
     def BoundingRect(self):
-        return self.shape().controlPointRect()
+        if hasattr(self, "line"):
+            return QRectF(self.line.p1(), self.line.p2()).normalized()
+        return QRectF()
 
     def shape(self):
         path = QPainterPath()
@@ -170,9 +236,9 @@ class ConnectionLine(QGraphicsItem):
         painter.drawLine(self.line)
 
         # Draw arrowhead
-        angle = self.line.angle()
-        dest_arrow_p1 = self.line.p2() + QPointF(self.arrow_size * 0.707 * 2, 0).rotated(angle - 135)
-        dest_arrow_p2 = self.line.p2() + QPointF(self.arrow_size * 0.707 * 2, 0).rotated(angle + 135)
+        #angle = self.line.angle()
+        dest_arrow_p1 = self.line.p2() + QPointF(self.arrow_size * 0.707 * 2, 0)
+        dest_arrow_p2 = self.line.p2() + QPointF(self.arrow_size * 0.707 * 2, 0)
 
         painter.setBrush(QBrush(Qt.GlobalColor.black))
         painter.drawPolygon(QPointF(self.line.p2()), dest_arrow_p1, dest_arrow_p2)
@@ -269,7 +335,6 @@ class TaskDialog(QDialog):
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            # We use a custom result code to signal deletion
             self.done(100) # Custom code for deletion
 
     def get_data(self):
@@ -281,6 +346,7 @@ class TaskDialog(QDialog):
             "color": self.current_color.name(),
         }
 
+
 class FlowChartView(QGraphicsView):
     """Custom QGraphicsView to handle background drawing and mouse events."""
     def __init__(self, scene, parent=None):
@@ -288,7 +354,8 @@ class FlowChartView(QGraphicsView):
         self.main_window = parent
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-        self.start_node_for_connection = None
+
+        self.zoom_factor = 1.15  # scale factor per wheel step
 
     def drawBackground(self, painter, rect):
         """Draws a grid background."""
@@ -309,27 +376,17 @@ class FlowChartView(QGraphicsView):
             painter.drawLine(x, top, x, bottom)
         for y in range(top_grid, bottom, grid_size):
             painter.drawLine(left, y, right, y)
-    
-    def node_context_menu(self, node, event):
-        """Handle right-click on a node."""
-        if self.start_node_for_connection is None:
-            # Start a new connection
-            self.start_node_for_connection = node
-            node.setSelected(True) # Visually indicate start node
+
+    def wheelEvent(self, event):
+        """Zoom in/out with Ctrl + mouse wheel."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.angleDelta().y() > 0:
+                zoom = self.zoom_factor
+            else:
+                zoom = 1 / self.zoom_factor
+            self.scale(zoom, zoom)
         else:
-            # End the connection
-            if self.start_node_for_connection != node:
-                self.main_window.add_connection(self.start_node_for_connection, node)
-            self.start_node_for_connection.setSelected(False)
-            self.start_node_for_connection = None
-
-    def mousePressEvent(self, event):
-        """Handle mouse press to cancel connection drawing."""
-        if event.button() == Qt.MouseButton.LeftButton and self.start_node_for_connection:
-            self.start_node_for_connection.setSelected(False)
-            self.start_node_for_connection = None
-        super().mousePressEvent(event)
-
+            super().wheelEvent(event)
 
 class MainWindow(QMainWindow):
     """
@@ -382,7 +439,9 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             task_data = dialog.get_data()
             task_data['id'] = str(uuid.uuid4())
-            task_data['pos'] = [20, 20] # Default position for new tasks
+            # Place at viewport center
+            view_center = self.view.mapToScene(self.view.viewport().rect().center())
+            task_data['pos'] = [view_center.x() - 100, view_center.y() - 40]
             task_data['created_date'] = QDate.currentDate().toString("yyyy-MM-dd")
             
             node = TaskNode(task_data, self)
@@ -441,51 +500,49 @@ class MainWindow(QMainWindow):
         """Saves all task and connection data to a JSON file."""
         tasks = [node.task_data for node in self.nodes.values()]
         connections = [line.connection_data for line in self.connections.values()]
-        
-        data_to_save = {
+
+        data = {
             "tasks": tasks,
             "connections": connections
         }
-        
-        try:
-            with open(SAVE_FILE, 'w') as f:
-                json.dump(data_to_save, f, indent=4)
-        except IOError as e:
-            print(f"Error saving data: {e}")
+        with open("tasks.json", "w") as f:
+            json.dump(data, f, indent=4)
 
     def load_data(self):
-        """Loads data from the JSON file and populates the scene."""
+        """Loads all task and connection data from a JSON file."""
         try:
-            with open(SAVE_FILE, 'r') as f:
+            with open("tasks.json", "r") as f:
                 data = json.load(f)
-                
-                # Load tasks
-                for task_data in data.get('tasks', []):
-                    node = TaskNode(task_data, self)
-                    self.scene.addItem(node)
-                    self.nodes[task_data['id']] = node
-
-                # Load connections
-                for conn_data in data.get('connections', []):
-                    start_node = self.nodes.get(conn_data['from'])
-                    end_node = self.nodes.get(conn_data['to'])
-                    if start_node and end_node:
-                        line = ConnectionLine(start_node, end_node, conn_data, self)
-                        self.scene.addItem(line)
-                        self.connections[conn_data['id']] = line
-                        
         except FileNotFoundError:
-            print(f"'{SAVE_FILE}' not found. Starting with a blank canvas.")
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Error loading or parsing data: {e}")
+            return
 
-    def node_context_menu(self, node, event):
-        """Proxy method to call the view's context menu handler."""
-        self.view.node_context_menu(node, event)
+        self.nodes.clear()
+        self.connections.clear()
+        self.scene.clear()
 
-if __name__ == '__main__':
+        # Recreate nodes
+        for task_data in data.get("tasks", []):
+            node = TaskNode(task_data, self)  # pass the dict directly
+            self.nodes[task_data["id"]] = node
+            self.scene.addItem(node)
+    
+        # Recreate connections
+        for conn_data in data.get("connections", []):
+            start_id = conn_data["from"]
+            end_id = conn_data["to"]
+            if start_id in self.nodes and end_id in self.nodes:
+                line = ConnectionLine(self.nodes[start_id], self.nodes[end_id], conn_data, self)
+                self.connections[conn_data["id"]] = line
+                self.scene.addItem(line)
+    
+    def closeEvent(self, event):
+        """Handles closing the application."""
+        self.save_data()
+        event.accept()
+
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-

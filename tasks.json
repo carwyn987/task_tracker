@@ -1,30 +1,55 @@
 {
     "tasks": [
         {
-            "title": "abc",
-            "description": "defgggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "title": "ab",
+            "description": "ab",
             "due_date": "2025-08-31",
-            "category": "Personal",
-            "color": "#99c1f1",
-            "id": "2bd92d82-7542-416b-b414-5b9704e12a4d",
+            "category": "Work",
+            "color": "#deddda",
+            "id": "28ddd1e6-d1d7-4e8c-b23d-c6c83e07d556",
             "pos": [
-                -1530.0,
-                -396.0
-            ]
+                -890.5999999999999,
+                -353.41999999999985
+            ],
+            "created_date": "2025-08-31"
         },
         {
-            "title": "dfasdf",
-            "description": "dsfsdafsda",
+            "title": "de",
+            "description": "def",
             "due_date": "2025-08-31",
             "category": "Work",
             "color": "#ffc107",
-            "id": "aade6109-7252-4bc3-b15d-5643ee634dd0",
+            "id": "170cc522-4b3e-48ed-865f-07c0de8005b7",
             "pos": [
-                -1558.0,
-                -248.0
+                -456.25,
+                -459.9999999999998
+            ],
+            "created_date": "2025-08-31"
+        },
+        {
+            "title": "ab",
+            "description": "defeaf",
+            "due_date": "2025-08-31",
+            "category": "Work",
+            "color": "#ffc107",
+            "id": "c203dea5-24ea-4b66-bd3a-4df0f2247a05",
+            "pos": [
+                -483.14999999999986,
+                -156.64999999999986
             ],
             "created_date": "2025-08-31"
         }
     ],
-    "connections": []
+    "connections": [
+        {
+            "id": "1c33e088-f67a-4c39-9119-818957c54d4f",
+            "from": "28ddd1e6-d1d7-4e8c-b23d-c6c83e07d556",
+            "to": "170cc522-4b3e-48ed-865f-07c0de8005b7"
+        },
+        {
+            "id": "4d9fdc28-f600-4f5a-aa36-ce561a881b86",
+            "from": "28ddd1e6-d1d7-4e8c-b23d-c6c83e07d556",
+            "to": "c203dea5-24ea-4b66-bd3a-4df0f2247a05"
+        }
+    ]
 }
